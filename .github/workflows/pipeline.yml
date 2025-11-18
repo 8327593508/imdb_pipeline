@@ -2,8 +2,8 @@ name: Daily TMDB ETL - commit CSV
 
 on:
   schedule:
-    - cron: "0 4 * * *"     # runs daily 04:00 UTC
-  workflow_dispatch:        # manual trigger
+    - cron: "0 4 * * *"     # daily 04:00 UTC
+  workflow_dispatch:        # allow manual run
 
 jobs:
   run-etl:
@@ -31,8 +31,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
+      - name: Build ETL + Postgres (NO CACHE)
+        run: docker-compose -f docker-compose.ci.yml build --no-cache
+
       - name: Run ETL + Postgres using CI compose
-        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
+        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
 
       - name: Export CSV from Postgres
         run: |
@@ -41,15 +44,16 @@ jobs:
             "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
 
-      - name: Commit updated CSV
+      - name: Commit updated CSV to repository
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update popular_movies.csv"
+          commit_message: "Update popular_movies.csv from GitHub Actions"
           file_pattern: "data/popular_movies.csv"
           branch: main
 
-      - name: Cleanup
+      - name: Cleanup containers
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 
