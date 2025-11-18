@@ -24,18 +24,8 @@ def run_once():
     logger.info("=== Pipeline run completed ===")
 
 
-def run_loop():
+def run_loop(interval):
     """Runs the pipeline repeatedly based on SCHEDULE seconds."""
-    if not SCHEDULE:
-        run_once()
-        return
-
-    try:
-        interval = int(SCHEDULE)
-    except:
-        logger.error("SCHEDULE must be an integer number of seconds.")
-        return
-
     while True:
         run_once()
         logger.info(f"Sleeping for {interval} seconds before next run...")
@@ -43,7 +33,15 @@ def run_loop():
 
 
 if __name__ == "__main__":
-    if SCHEDULE:
-        run_loop()
+    try:
+        interval = int(SCHEDULE)
+    except:
+        interval = 0
+
+    if interval > 0:
+        # LOCAL MODE: Repeat forever
+        run_loop(interval)
     else:
+        # CI MODE (SCHEDULE=0): Run once and exit
         run_once()
+
