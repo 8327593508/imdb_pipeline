@@ -1,21 +1,19 @@
-name: "Daily TMDB ETL - commit CSV"
+name: Daily TMDB ETL - commit CSV
 
 on:
   schedule:
-    - cron: "0 4 * * *"     # every day at 04:00 UTC
-  workflow_dispatch:       # allow manual trigger
+    - cron: "0 4 * * *"     # runs daily 04:00 UTC
+  workflow_dispatch:        # manual trigger
 
 jobs:
   run-etl:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2. Create .env from GitHub Secrets
-      - name: Create .env from secrets
+      - name: Create .env from GitHub Secrets
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
@@ -28,31 +26,21 @@ jobs:
           SCHEDULE=0
           EOF
 
-      # 3. Enable Docker Buildx (required by GH Actions)
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
 
-      # 4. Run ETL + Postgres using docker compose (correct syntax)
-      - name: Run ETL + Postgres
-        run: docker compose -f docker-compose.ci.yml up --build --abort-on-container-exit
+      - name: Run ETL + Postgres using CI compose
+        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
 
-      # 5. Export CSV from Postgres container
       - name: Export CSV from Postgres
         run: |
-          # find postgres container
           CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
-          echo "Using container: $CONTAINER"
-
-          # export CSV from database
           docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) \
-            TO '/tmp/popular_movies.csv' CSV HEADER;\""
-
-          # copy CSV into repo
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
 
-      # 6. Commit updated CSV back to GitHub
       - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
@@ -60,9 +48,9 @@ jobs:
           file_pattern: "data/popular_movies.csv"
           branch: main
 
-      # 7. Clean up docker resources
-      - name: Cleanup docker
-        run: docker compose -f docker-compose.ci.yml down --volumes
+      - name: Cleanup
+        run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 
