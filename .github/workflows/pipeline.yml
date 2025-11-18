@@ -1,8 +1,8 @@
-name: "Daily TMDB ETL - commit CSV"
+name: Daily TMDB ETL - commit CSV
 
 on:
   schedule:
-    - cron: "0 4 * * *"     # every day at 04:00 UTC
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create .env from repo secrets
+      - name: Create .env file
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
@@ -26,19 +26,21 @@ jobs:
           SCHEDULE=0
           EOF
 
-      - name: Set up Docker Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Run ETL + Postgres
         run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
 
-      - name: Export CSV from Postgres
+      - name: Export CSV from database
+        env:
+          PG_USER: ${{ secrets.PG_USER }}
+          PG_DB: ${{ secrets.PG_DB }}
         run: |
           CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
-          echo "Using container: $CONTAINER"
+          echo "Found Postgres container: $CONTAINER"
 
-          docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
+          docker exec $CONTAINER bash -c "psql -U $PG_USER -d $PG_DB -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
 
@@ -49,5 +51,6 @@ jobs:
           file_pattern: "data/popular_movies.csv"
           branch: main
 
-      - name: Cleanup containers
+      - name: Cleanup
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
