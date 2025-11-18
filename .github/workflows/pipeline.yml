@@ -1,19 +1,21 @@
-name: Daily TMDB ETL - commit CSV
+name: "Daily TMDB ETL - commit CSV"
 
 on:
   schedule:
-    - cron: "0 4 * * *"      # runs every day at 04:00 UTC
-  workflow_dispatch:         # allows manual trigger
+    - cron: "0 4 * * *"     # every day at 04:00 UTC
+  workflow_dispatch:       # allow manual trigger
 
 jobs:
   run-etl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # 1. Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create .env file from GitHub Secrets
+      # 2. Create .env from GitHub Secrets
+      - name: Create .env from secrets
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
@@ -22,37 +24,45 @@ jobs:
           PG_HOST=postgres
           PG_DB=${{ secrets.PG_DB }}
           PG_PORT=${{ secrets.PG_PORT }}
-          MAX_PAGES=5
+          MAX_PAGES=${{ secrets.MAX_PAGES }}
           SCHEDULE=0
           EOF
 
-      - name: Set up Docker Buildx
+      # 3. Enable Docker Buildx (required by GH Actions)
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Run ETL + Postgres using CI compose
-        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
+      # 4. Run ETL + Postgres using docker compose (correct syntax)
+      - name: Run ETL + Postgres
+        run: docker compose -f docker-compose.ci.yml up --build --abort-on-container-exit
 
+      # 5. Export CSV from Postgres container
       - name: Export CSV from Postgres
-        env:
-          PG_USER: ${{ secrets.PG_USER }}
-          PG_DB: ${{ secrets.PG_DB }}
         run: |
+          # find postgres container
           CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
-          echo "Postgres container ID: $CONTAINER"
+          echo "Using container: $CONTAINER"
 
+          # export CSV from database
           docker exec $CONTAINER bash -c \
-            "psql -U $PG_USER -d $PG_DB -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) \
+            TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
+          # copy CSV into repo
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
 
-      - name: Commit updated CSV to repository
+      # 6. Commit updated CSV back to GitHub
+      - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update popular_movies.csv (auto ETL)"
+          commit_message: "Update popular_movies.csv"
           file_pattern: "data/popular_movies.csv"
           branch: main
 
-      - name: Cleanup containers
-        run: docker-compose -f docker-compose.ci.yml down --volumes
+      # 7. Clean up docker resources
+      - name: Cleanup docker
+        run: docker compose -f docker-compose.ci.yml down --volumes
+
 
 
