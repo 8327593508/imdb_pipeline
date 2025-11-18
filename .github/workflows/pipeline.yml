@@ -43,5 +43,16 @@ jobs:
           docker exec $CONTAINER bash -c \
             "psql -U $PG_USER -d $PG_DB -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
-          docker cp $CONTAINER:/tmp/pop
+          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
+
+      - name: Commit updated CSV to repository
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "Update popular_movies.csv (auto ETL)"
+          file_pattern: "data/popular_movies.csv"
+          branch: main
+
+      - name: Cleanup containers
+        run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
