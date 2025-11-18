@@ -4,6 +4,7 @@ from src.transform.transform_movies import transform_movies
 from src.load.load_to_postgres import upsert_movies
 from config.config import MAX_PAGES, SCHEDULE
 from src.utils.logger import get_logger
+import time
 
 logger = get_logger('main')
 
@@ -17,17 +18,18 @@ def run_once():
 
 
 if __name__ == "__main__":
-    # Force CI to run ONLY ONCE
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    # When running inside GitHub Actions → always run ONCE
+    if os.environ.get("GITHUB_ACTIONS"):
         run_once()
+
+    # Local mode
     else:
-        # Local mode
         if SCHEDULE and int(SCHEDULE) > 0:
-            import time
             while True:
                 run_once()
                 logger.info(f"Sleeping for {SCHEDULE} seconds...")
                 time.sleep(int(SCHEDULE))
         else:
             run_once()
+
 
