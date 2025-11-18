@@ -1,0 +1,65 @@
+name: Daily TMDB ETL -> commit CSV
+
+on:
+  schedule:
+    - cron: '0 4 * * *'   # daily at 04:00 UTC (edit if you want)
+  workflow_dispatch:     # manual trigger
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Create .env from repo secrets
+        run: |
+          cat > .env <<EOF
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          PG_USER=${{ secrets.PG_USER }}
+          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
+          PG_HOST=postgres
+          PG_DB=${{ secrets.PG_DB }}
+          PG_PORT=${{ secrets.PG_PORT }}
+          MAX_PAGES=${{ secrets.MAX_PAGES }}
+          SCHEDULE=0
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and run compose (ETL + Postgres)
+        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
+
+      - name: Wait a moment for DB to be ready
+        run: sleep 3
+
+      - name: Export popular_movies to CSV (from Postgres container)
+        env:
+          PGPASS: ${{ secrets.PG_PASSWORD }}
+        run: |
+          # copy exported CSV out of the running container (container name uses project dir name; find it)
+          CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
+          if [ -z "$CONTAINER" ]; then
+            echo "postgres container not found - listing all containers"
+            docker ps -a
+            exit 1
+          fi
+          echo "Using container $CONTAINER"
+          docker exec $CONTAINER bash -c "psql -U ${PG_USER} -d ${PG_DB} -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
+          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
+          ls -l ./data || true
+
+      - name: Commit CSV back to repo
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "Update exported popular_movies CSV from GitHub Actions"
+          file_pattern: "data/popular_movies.csv"
+          branch: main
+        env:
+          GIT_AUTHOR_NAME: github-actions
+          GIT_AUTHOR_EMAIL: actions@github.com
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bring down compose (cleanup)
+        run: docker-compose -f docker-compose.ci.yml down --volumes
