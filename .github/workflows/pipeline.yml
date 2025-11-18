@@ -1,1 +1,47 @@
+name: Daily TMDB ETL - commit CSV
+
+on:
+  schedule:
+    - cron: "0 4 * * *"      # runs every day at 04:00 UTC
+  workflow_dispatch:         # allows manual trigger
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create .env file from GitHub Secrets
+        run: |
+          cat > .env <<EOF
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          PG_USER=${{ secrets.PG_USER }}
+          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
+          PG_HOST=postgres
+          PG_DB=${{ secrets.PG_DB }}
+          PG_PORT=${{ secrets.PG_PORT }}
+          MAX_PAGES=5
+          SCHEDULE=0
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run ETL + Postgres using CI compose
+        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
+
+      - name: Export CSV from Postgres
+        env:
+          PG_USER: ${{ secrets.PG_USER }}
+          PG_DB: ${{ secrets.PG_DB }}
+        run: |
+          CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
+          echo "Postgres container ID: $CONTAINER"
+
+          docker exec $CONTAINER bash -c \
+            "psql -U $PG_USER -d $PG_DB -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
+
+          docker cp $CONTAINER:/tmp/pop
 
