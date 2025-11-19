@@ -1,38 +1,45 @@
+# src/main.py
 import os
-from src.extract.tmdb_extract import fetch_popular_pages
-from src.transform.transform_movies import transform_movies
-from src.load.load_to_postgres import upsert_movies
-from config.config import MAX_PAGES, SCHEDULE
+import pandas as pd
+
+from src.extract.tmdb_master_extract import extract_all_categories
 from src.utils.logger import get_logger
-import time
 
 logger = get_logger("main")
 
 
 def run_once():
-    logger.info("=== Starting pipeline run ===")
-    rows = fetch_popular_pages(MAX_PAGES)
-    df = transform_movies(rows)
-    upsert_movies(df)
-    logger.info("=== Pipeline run completed ===")
+    logger.info("=== Starting FULL TMDB extraction ===")
+
+    # Extract 4 datasets
+    df_popular, df_top, df_upcoming, df_trending = extract_all_categories(
+        pages_popular=MAX_PAGES,
+        pages_top=MAX_PAGES,
+        pages_upcoming=30,
+        pages_trending=30
+    )
+
+    # Ensure data directory exists
+    os.makedirs("data", exist_ok=True)
+
+    # Save 4 separate CSVs
+    df_popular.to_csv("data/popular_movies.csv", index=False)
+    df_top.to_csv("data/top_rated_movies.csv", index=False)
+    df_upcoming.to_csv("data/upcoming_movies.csv", index=False)
+    df_trending.to_csv("data/trending_movies.csv", index=False)
+
+    logger.info("Saved all CSV files successfully!")
+    logger.info("=== Extraction completed ===")
 
 
 if __name__ == "__main__":
-
-    # 🔥 If running inside CI, ALWAYS one run.
-    if os.getenv("GITHUB_ACTIONS", "").lower() == "true":
-        logger.info("GitHub Actions detected — running ONCE only.")
+    # Force run ONCE in GitHub Actions
+    if os.environ.get("GITHUB_ACTIONS") == "true":
         run_once()
-        exit(0)
-
-    # 🔥 Local mode
-    if SCHEDULE and int(SCHEDULE) > 0:
-        while True:
-            run_once()
-            logger.info(f"Sleeping for {SCHEDULE} seconds...")
-            time.sleep(int(SCHEDULE))
     else:
+        # Local mode: always run once
         run_once()
+
 
 
 

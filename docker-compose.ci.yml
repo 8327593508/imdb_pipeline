@@ -1,43 +1,18 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:15
-    container_name: postgres
-    environment:
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_DB: ${PG_DB}
-    # optional persistent data within the runner (not strictly necessary in CI)
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    # healthcheck so other services can wait for Postgres readiness
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-
   app:
+    container_name: tmdb_app_ci
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: tmdb_app
     env_file:
-      - .env                # workflow writes this .env from secrets
+      - .env
     environment:
-      # ensure the container sees this flag (main.py checks for it)
-      GITHUB_ACTIONS: "true"
-      # allow overriding inside .env as needed; keep PG_HOST pointing to the service
-      PG_HOST: postgres
-      PG_PORT: ${PG_PORT:-5432}
-      # TMDB API key and other vars will be read from `.env`
-    depends_on:
-      - postgres
-    # Run the python main directly; -u for unbuffered logs
+      GITHUB_ACTIONS: "true"   # Forces main.py → run once
+    volumes:
+      - ./data:/app/data       # Make sure CSVs are saved in repo
     command: >
-      sh -c "export GITHUB_ACTIONS=true && python -u src/main.py"
+      sh -c "python -u src/main.py"
 
-volumes:
-  pgdata:
 
