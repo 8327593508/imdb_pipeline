@@ -2,27 +2,26 @@ name: Daily TMDB Multi-File ETL
 
 on:
   schedule:
-    - cron: "0 4 * * *"   # Runs daily at 04:00 UTC
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 jobs:
-  run-etl:
+  etl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create .env file
+      - name: Create .env from Secrets
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
           PG_USER=${{ secrets.PG_USER }}
           PG_PASSWORD=${{ secrets.PG_PASSWORD }}
           PG_DB=${{ secrets.PG_DB }}
-          PG_HOST=postgres
           PG_PORT=5432
-          MAX_PAGES=50
+          SCHEDULE=0
           EOF
 
       - name: Install Docker Compose
@@ -30,54 +29,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      # 🔥 Force full rebuild (no cache)
-      - name: Build containers (no cache)
-        run: docker-compose -f docker-compose.ci.yml build --no-cache
-
       - name: Run ETL container
-        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
 
-      # ----------------------
-      # Export CSV from stopped Postgres
-      # ----------------------
-      - name: Export CSV from Postgres
+      - name: Export CSVs from Postgres
         run: |
-          echo "Searching for Postgres container..."
-          
-          # Get stopped container
-          CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}" | head -n 1)
+          CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
           echo "Postgres container = $CONTAINER"
 
-          docker start $CONTAINER
+          docker exec $CONTAINER bash -c \
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
           docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY (SELECT * FROM movie_details) TO '/tmp/movie_details.csv' CSV HEADER;\""
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;\""
 
           docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY (SELECT * FROM movie_credits) TO '/tmp/movie_credits.csv' CSV HEADER;\""
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;\""
 
-          docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY (SELECT * FROM popular_movies) TO '/tmp/popular_movies.csv' CSV HEADER;\""
-
-          # Copy files
-          mkdir -p data
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
           docker cp $CONTAINER:/tmp/movie_details.csv ./data/movie_details.csv
           docker cp $CONTAINER:/tmp/movie_credits.csv ./data/movie_credits.csv
 
-      # Commit CSVs
-      - name: Commit updated CSV files
+      - name: Commit updated CSVs
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: "Update TMDB CSV files"
-          file_pattern: data/*.csv
+          file_pattern: "data/*.csv"
           branch: main
 
       - name: Cleanup
-        run: docker-compose -f docker-compose.ci.yml down -v
+        run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 

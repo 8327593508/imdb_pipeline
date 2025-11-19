@@ -1,31 +1,40 @@
 from src.extract.tmdb_master_extract import extract_all_categories
 from src.transform.transform_movies import transform_movies
+from src.transform.transform_movie_details import transform_details
+from src.transform.transform_movie_credits import transform_credits
+
 from src.load.load_to_postgres import upsert_movies
+from src.load.load_movie_details import upsert_movie_details
+from src.load.load_movie_credits import upsert_movie_credits
+
 from src.utils.logger import get_logger
+import os
 
 logger = get_logger("main")
 
+
 def run_once():
-    logger.info("=== Starting multi-file ETL ===")
+    logger.info("=== Starting master TMDB ETL ===")
 
-    data = extract_all_categories(
-        pages_popular=200,
-        pages_top=200,
-        pages_upcoming=50,
-        pages_trending=50
-    )
+    movie_ids, movies_raw, details_raw, credits_raw = extract_all_categories()
 
-    # Save CSVs
-    data["movies"].to_csv("data/movies.csv", index=False)
-    data["credits"].to_csv("data/credits.csv", index=False)
+    df_movies = transform_movies(movies_raw)
+    df_details = transform_details(details_raw)
+    df_credits = transform_credits(credits_raw)
 
-    # Load to DB (optional)
-    upsert_movies(data["movies"])
+    upsert_movies(df_movies)
+    upsert_movie_details(df_details)
+    upsert_movie_credits(df_credits)
 
     logger.info("=== ETL Completed ===")
 
+
 if __name__ == "__main__":
-    run_once()
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        run_once()
+    else:
+        run_once()
+
 
 
 
