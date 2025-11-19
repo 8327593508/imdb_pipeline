@@ -2,8 +2,8 @@ name: Daily TMDB ETL - commit CSV
 
 on:
   schedule:
-    - cron: "0 4 * * *"     # daily run at 04:00 UTC
-  workflow_dispatch:        # allow manual run
+    - cron: "0 4 * * *"   # run everyday at 04:00 UTC
+  workflow_dispatch:
 
 jobs:
   run-etl:
@@ -11,15 +11,15 @@ jobs:
 
     steps:
 
-      # -------------------------------
-      # 1. Checkout repository
-      # -------------------------------
+      # -----------------------------
+      # 1) Checkout repository
+      # -----------------------------
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # -------------------------------
-      # 2. Create .env file from secrets
-      # -------------------------------
+      # -----------------------------
+      # 2) Create .env inside runner
+      # -----------------------------
       - name: Create .env from GitHub Secrets
         run: |
           cat > .env <<EOF
@@ -33,26 +33,38 @@ jobs:
           SCHEDULE=0
           EOF
 
-      # -------------------------------
-      # 3. Install Docker Compose
-      # -------------------------------
+      # -----------------------------
+      # 3) Install Docker Compose
+      # -----------------------------
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      # -------------------------------
-      # 4. Run ETL in CI (foreground mode)
-      # -------------------------------
-      - name: Run ETL (foreground mode)
-        run: docker-compose -f docker-compose.ci.yml up --build --exit-code-from app
+      # -----------------------------
+      # 4) Run ETL (AND KEEP POSTGRES STOPPED)
+      # -----------------------------
+      - name: Run ETL container + Postgres
+        run: |
+          docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
 
-      # -------------------------------
-      # 5. Export CSV from Postgres
-      # -------------------------------
+      # -----------------------------
+      # 5) Export CSV even if Postgres stopped
+      # -----------------------------
       - name: Export CSV from Postgres
         run: |
+          echo "Searching for Postgres container..."
+
+          # Find RUNNING postgres container
           CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
+
+          # If not running, find STOPPED postgres container
+          if [ -z "$CONTAINER" ]; then
+            echo "Looking for stopped Postgres container..."
+            CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
+          fi
+
+          # If still not found → FAIL
           if [ -z "$CONTAINER" ]; then
             echo "Postgres container not found!"
             docker ps -a
@@ -60,27 +72,35 @@ jobs:
           fi
 
           echo "Postgres container: $CONTAINER"
+          echo "Running COPY command..."
 
           docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) \
+            TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
+          echo "Copying CSV to /data folder"
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
 
-      # -------------------------------
-      # 6. Commit updated CSV back to repo
-      # -------------------------------
+          echo "CSV export complete."
+          ls -l ./data/popular_movies.csv || true
+
+      # -----------------------------
+      # 6) Commit CSV back to GitHub
+      # -----------------------------
       - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Auto-update TMDB popular movies CSV"
+          commit_message: "Update popular_movies.csv"
           file_pattern: "data/popular_movies.csv"
           branch: main
 
-      # -------------------------------
-      # 7. Cleanup Docker containers
-      # -------------------------------
+      # -----------------------------
+      # 7) Cleanup
+      # -----------------------------
       - name: Cleanup
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 
