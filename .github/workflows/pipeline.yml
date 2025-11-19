@@ -1,9 +1,9 @@
-name: Daily TMDB ETL - commit CSV
+name: Daily TMDB Multi-File ETL
 
 on:
   schedule:
-    - cron: "0 4 * * *"
-  workflow_dispatch:
+    - cron: "0 4 * * *"     # runs daily at 04:00 UTC
+  workflow_dispatch:        # allow manual run
 
 jobs:
   run-etl:
@@ -16,66 +16,34 @@ jobs:
 
       - name: Create .env from secrets
         run: |
-          cat > .env <<EOF
-          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
-          PG_USER=${{ secrets.PG_USER }}
-          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
-          PG_DB=${{ secrets.PG_DB }}
-          PG_PORT=${{ secrets.PG_PORT }}
-          MAX_PAGES=${{ secrets.MAX_PAGES }}
-          SCHEDULE=0
-          EOF
+          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+          echo "MAX_PAGES=${{ secrets.MAX_PAGES }}" >> .env
+          echo "PAGES_POPULAR=${{ secrets.PAGES_POPULAR }}" >> .env
+          echo "PAGES_TOP=${{ secrets.PAGES_TOP }}" >> .env
+          echo "PAGES_UPCOMING=${{ secrets.PAGES_UPCOMING }}" >> .env
+          echo "PAGES_TRENDING=${{ secrets.PAGES_TRENDING }}" >> .env
 
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      # ---------------------------------------------
-      # 1️⃣ Start Postgres only (keep running)
-      # ---------------------------------------------
-      - name: Start Postgres only
-        run: docker-compose -f docker-compose.ci.yml up -d postgres
+      - name: Run ETL container (generate CSV files)
+        run: docker-compose -f docker-compose.ci.yml up --build --exit-code-from app
 
-      # ---------------------------------------------
-      # 2️⃣ Run app one-time (ETL)
-      # ---------------------------------------------
-      - name: Run ETL once
-        run: docker-compose -f docker-compose.ci.yml run --rm app
+      - name: List generated files
+        run: ls -l data || true
 
-      # ---------------------------------------------
-      # 3️⃣ Export CSV
-      # ---------------------------------------------
-      - name: Export CSV from Postgres
-        run: |
-          echo "Searching for Postgres container..."
-          CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
-
-          echo "Postgres container = $CONTAINER"
-
-          echo "Running COPY command..."
-          docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) \
-            TO '/tmp/popular_movies.csv' CSV HEADER;\""
-
-          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
-
-      # ---------------------------------------------
-      # 4️⃣ Commit CSV to repo
-      # ---------------------------------------------
-      - name: Commit updated CSV
+      - name: Commit updated CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update popular_movies.csv"
-          file_pattern: "data/popular_movies.csv"
+          commit_message: "Update TMDB multi-file CSV dataset"
+          file_pattern: data/*.csv
           branch: main
 
-      # ---------------------------------------------
-      # 5️⃣ Cleanup everything
-      # ---------------------------------------------
-      - name: Cleanup containers
+      - name: Cleanup
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 
