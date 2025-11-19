@@ -1,27 +1,28 @@
 name: Daily TMDB Multi-File ETL
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "0 4 * * *"   # Runs daily at 04:00 UTC
+  workflow_dispatch:
 
 jobs:
   run-etl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env file from GitHub secrets
+      - name: Create .env file
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
           PG_USER=${{ secrets.PG_USER }}
           PG_PASSWORD=${{ secrets.PG_PASSWORD }}
           PG_DB=${{ secrets.PG_DB }}
+          PG_HOST=postgres
           PG_PORT=5432
-          MAX_PAGES=${{ secrets.MAX_PAGES }}
+          MAX_PAGES=50
           EOF
 
       - name: Install Docker Compose
@@ -29,54 +30,54 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Force full rebuild and run ETL
+      # 🔥 Force full rebuild (no cache)
+      - name: Build containers (no cache)
+        run: docker-compose -f docker-compose.ci.yml build --no-cache
+
+      - name: Run ETL container
+        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+
+      # ----------------------
+      # Export CSV from stopped Postgres
+      # ----------------------
+      - name: Export CSV from Postgres
         run: |
-          docker-compose -f docker-compose.ci.yml down --volumes --remove-orphans || true
-          docker-compose -f docker-compose.ci.yml build --no-cache
-          docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+          echo "Searching for Postgres container..."
+          
+          # Get stopped container
+          CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}" | head -n 1)
+          echo "Postgres container = $CONTAINER"
 
-      - name: Identify Postgres container
-        id: pg
-        run: |
-          CID=$(docker ps -a --filter "ancestor=postgres:15" --format "{{.ID}}" | head -n 1)
-          echo "container_id=$CID" >> $GITHUB_OUTPUT
-          echo "Postgres container = $CID"
+          docker start $CONTAINER
 
-      - name: Export CSV files
-        if: ${{ steps.pg.outputs.container_id != '' }}
-        run: |
-          CID=${{ steps.pg.outputs.container_id }}
-
-          echo "Exporting popular movies..."
-          docker exec $CID bash -c \
+          docker exec $CONTAINER bash -c \
             "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER\""
+            -c \"\\COPY (SELECT * FROM movie_details) TO '/tmp/movie_details.csv' CSV HEADER;\""
 
-          docker cp $CID:/tmp/popular_movies.csv ./data/popular_movies.csv
-
-          echo "Exporting movie details..."
-          docker exec $CID bash -c \
+          docker exec $CONTAINER bash -c \
             "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER\""
+            -c \"\\COPY (SELECT * FROM movie_credits) TO '/tmp/movie_credits.csv' CSV HEADER;\""
 
-          docker cp $CID:/tmp/movie_details.csv ./data/movie_details.csv
-
-          echo "Exporting movie credits..."
-          docker exec $CID bash -c \
+          docker exec $CONTAINER bash -c \
             "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c \"\\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER\""
+            -c \"\\COPY (SELECT * FROM popular_movies) TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
-          docker cp $CID:/tmp/movie_credits.csv ./data/movie_credits.csv
+          # Copy files
+          mkdir -p data
+          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
+          docker cp $CONTAINER:/tmp/movie_details.csv ./data/movie_details.csv
+          docker cp $CONTAINER:/tmp/movie_credits.csv ./data/movie_credits.csv
 
-      - name: Commit CSVs
+      # Commit CSVs
+      - name: Commit updated CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: "Update TMDB CSV files"
-          file_pattern: "data/*.csv"
+          file_pattern: data/*.csv
           branch: main
 
       - name: Cleanup
-        run: docker-compose -f docker-compose.ci.yml down --volumes
+        run: docker-compose -f docker-compose.ci.yml down -v
 
 
 
