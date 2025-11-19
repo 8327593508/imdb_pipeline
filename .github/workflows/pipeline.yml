@@ -1,51 +1,88 @@
 name: Daily TMDB Multi-File ETL
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *"     # daily at 04:00 UTC
-  workflow_dispatch:        # manual trigger
+    - cron: "0 4 * * *"     # Runs daily at 04:00 UTC
 
 jobs:
-  etl:
+  run-etl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      # -------------------------------
+      # 1. CHECKOUT REPO
+      # -------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env from secrets
+      # -------------------------------
+      # 2. CREATE .ENV FILE
+      # -------------------------------
+      - name: Create .env from GitHub Secrets
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
-          TMDB_API_POPULAR=${{ secrets.TMDB_API_POPULAR }}
-          TMDB_API_TOP=${{ secrets.TMDB_API_TOP }}
-          TMDB_API_UPCOMING=${{ secrets.TMDB_API_UPCOMING }}
-          TMDB_API_TRENDING=${{ secrets.TMDB_API_TRENDING }}
           PG_USER=${{ secrets.PG_USER }}
           PG_PASSWORD=${{ secrets.PG_PASSWORD }}
           PG_DB=${{ secrets.PG_DB }}
-          PG_PORT=${{ secrets.PG_PORT }}
+          PG_PORT=5432
+          PG_HOST=postgres
+          MAX_PAGES=1
+          SCHEDULE=0
           EOF
 
+      # -------------------------------
+      # 3. INSTALL DOCKER & COMPOSE
+      # -------------------------------
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Run ETL
-        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
+      # -------------------------------
+      # 4. FORCE DOCKER REBUILD (NO CACHE)
+      # -------------------------------
+      - name: Build ETL container (no cache)
+        run: docker-compose -f docker-compose.ci.yml build --no-cache
 
-      - name: List CSV files
-        run: ls -R data
+      # -------------------------------
+      # 5. RUN ETL ONCE
+      # -------------------------------
+      - name: Run ETL container (generate CSV files)
+        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
 
-      - name: Commit CSV files
+      # -------------------------------
+      # 6. EXPORT CSV FROM POSTGRES
+      # -------------------------------
+      - name: Export CSV from Postgres
+        run: |
+          echo "Searching for Postgres container..."
+          CONTAINER=$(docker ps -a --filter "ancestor=postgres:15" --format "{{.ID}}")
+
+          echo "Postgres container = $CONTAINER"
+
+          echo "Running COPY command..."
+          docker exec $CONTAINER bash -c \
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \
+            \"\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER;\""
+
+          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
+
+      # -------------------------------
+      # 7. COMMIT CSV TO REPO
+      # -------------------------------
+      - name: Commit updated CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update TMDB CSV files"
+          commit_message: "Update popular_movies.csv"
           file_pattern: "data/*.csv"
           branch: main
 
-      - name: Cleanup
+      # -------------------------------
+      # 8. CLEANUP
+      # -------------------------------
+      - name: Cleanup Docker
         run: docker-compose -f docker-compose.ci.yml down --volumes
 
 
