@@ -1,25 +1,30 @@
 name: Daily TMDB ETL - commit CSV
 
 on:
+  # ▶ Schedule: Runs every day at 04:00 UTC automatically
   schedule:
-    - cron: "0 4 * * *"     # runs daily 04:00 UTC
-  workflow_dispatch:        # manual trigger
+    - cron: "0 4 * * *"
+
+  # ▶ Allows you to run the workflow manually from GitHub Actions
+  workflow_dispatch:
 
 jobs:
   run-etl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # Use GitHub's Ubuntu VM
 
     steps:
-
-      # ------------------------------
-      # 1. Checkout repository
-      # ------------------------------
+      # -----------------------------------------------------------
+      # 1️⃣ CHECKOUT CODE
+      # -----------------------------------------------------------
       - name: Checkout repo
         uses: actions/checkout@v4
+        # Brings your repository code into the GitHub runner
 
-      # ------------------------------
-      # 2. Create .env for Docker
-      # ------------------------------
+      # -----------------------------------------------------------
+      # 2️⃣ CREATE .env FILE FOR DOCKER USING GITHUB SECRETS
+      # -----------------------------------------------------------
+      # GitHub secrets → written into a temporary .env file
+      # This .env file will be loaded inside Docker containers
       - name: Create .env from GitHub Secrets
         run: |
           cat > .env <<EOF
@@ -30,41 +35,56 @@ jobs:
           PG_DB=${{ secrets.PG_DB }}
           PG_PORT=${{ secrets.PG_PORT }}
           MAX_PAGES=${{ secrets.MAX_PAGES }}
-          SCHEDULE=0
+          SCHEDULE=0        # Important: CI runs ONLY once
           EOF
 
-      # ------------------------------
-      # 3. Install Docker Compose
-      # ------------------------------
+      # -----------------------------------------------------------
+      # 3️⃣ INSTALL DOCKER COMPOSE
+      # -----------------------------------------------------------
+      # GitHub Actions does NOT include docker-compose by default
+      # We need it to run Postgres + Python ETL together
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      # ------------------------------
-      # 4. Force NO-CACHE build + run ETL
-      # ------------------------------
-      - name: Force build & run ETL
-        run: |
-          docker-compose -f docker-compose.ci.yml build --no-cache
-          docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+      # -----------------------------------------------------------
+      # 4️⃣ RUN DOCKER COMPOSE PIPELINE
+      # -----------------------------------------------------------
+      # --build          → rebuild images every run (fresh)
+      # -d               → run containers in background
+      # --exit-code-from app → use tmdb_app exit code
+      #
+      # VERY IMPORTANT:
+      # -d ensures Postgres container stays alive
+      # so we can later export the CSV properly.
+      - name: Run ETL and keep Postgres running
+        run: docker-compose -f docker-compose.ci.yml up --build -d --exit-code-from app
 
-      # ------------------------------
-      # 5. Export CSV from Postgres
-      # ------------------------------
+      # -----------------------------------------------------------
+      # 5️⃣ EXPORT CSV FROM POSTGRES DATABASE
+      # -----------------------------------------------------------
+      # Steps:
+      # 1. Find running Postgres container ID
+      # 2. Run COPY command inside container → export CSV to /tmp
+      # 3. Copy CSV file out into repo/data folder
       - name: Export CSV from Postgres
         run: |
+          # Find Postgres container ID
           CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
           echo "Postgres container = $CONTAINER"
-          
+
+          # Export table to CSV inside container
           docker exec $CONTAINER bash -c \
             "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;\""
 
+          # Copy CSV from container → local repo
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
 
-      # ------------------------------
-      # 6. Commit updated CSV to GitHub
-      # ------------------------------
+      # -----------------------------------------------------------
+      # 6️⃣ COMMIT UPDATED CSV FILE BACK TO GITHUB
+      # -----------------------------------------------------------
+      # Every time ETL runs, CSV gets updated + committed
       - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
@@ -72,11 +92,14 @@ jobs:
           file_pattern: "data/popular_movies.csv"
           branch: main
 
-      # ------------------------------
-      # 7. Cleanup containers
-      # ------------------------------
+      # -----------------------------------------------------------
+      # 7️⃣ CLEANUP (STOP & REMOVE DOCKER CONTAINERS + VOLUMES)
+      # -----------------------------------------------------------
+      # Ensures GitHub runner stays clean after workflow ends
       - name: Cleanup
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
+
 
 
 
