@@ -1,44 +1,32 @@
-# src/main.py
-import os
-import pandas as pd
-
 from src.extract.tmdb_master_extract import extract_all_categories
+from src.transform.transform_movies import transform_movies
+from src.load.load_to_postgres import upsert_movies
 from src.utils.logger import get_logger
 
 logger = get_logger("main")
 
-
 def run_once():
-    logger.info("=== Starting FULL TMDB extraction ===")
+    logger.info("=== Starting multi-file ETL ===")
 
-    # Extract 4 datasets
-    df_popular, df_top, df_upcoming, df_trending = extract_all_categories(
-        pages_popular=MAX_PAGES,
-        pages_top=MAX_PAGES,
-        pages_upcoming=30,
-        pages_trending=30
+    data = extract_all_categories(
+        pages_popular=200,
+        pages_top=200,
+        pages_upcoming=50,
+        pages_trending=50
     )
 
-    # Ensure data directory exists
-    os.makedirs("data", exist_ok=True)
+    # Save CSVs
+    data["movies"].to_csv("data/movies.csv", index=False)
+    data["credits"].to_csv("data/credits.csv", index=False)
 
-    # Save 4 separate CSVs
-    df_popular.to_csv("data/popular_movies.csv", index=False)
-    df_top.to_csv("data/top_rated_movies.csv", index=False)
-    df_upcoming.to_csv("data/upcoming_movies.csv", index=False)
-    df_trending.to_csv("data/trending_movies.csv", index=False)
+    # Load to DB (optional)
+    upsert_movies(data["movies"])
 
-    logger.info("Saved all CSV files successfully!")
-    logger.info("=== Extraction completed ===")
-
+    logger.info("=== ETL Completed ===")
 
 if __name__ == "__main__":
-    # Force run ONCE in GitHub Actions
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        run_once()
-    else:
-        # Local mode: always run once
-        run_once()
+    run_once()
+
 
 
 

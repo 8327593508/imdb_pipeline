@@ -2,47 +2,52 @@ name: Daily TMDB Multi-File ETL
 
 on:
   schedule:
-    - cron: "0 4 * * *"     # runs daily at 04:00 UTC
-  workflow_dispatch:        # allow manual run
+    - cron: "0 4 * * *"     # daily at 04:00 UTC
+  workflow_dispatch:        # manual trigger
 
 jobs:
-  run-etl:
+  etl:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Create .env from secrets
         run: |
-          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
-          echo "MAX_PAGES=${{ secrets.MAX_PAGES }}" >> .env
-          echo "PAGES_POPULAR=${{ secrets.PAGES_POPULAR }}" >> .env
-          echo "PAGES_TOP=${{ secrets.PAGES_TOP }}" >> .env
-          echo "PAGES_UPCOMING=${{ secrets.PAGES_UPCOMING }}" >> .env
-          echo "PAGES_TRENDING=${{ secrets.PAGES_TRENDING }}" >> .env
+          cat > .env <<EOF
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          TMDB_API_POPULAR=${{ secrets.TMDB_API_POPULAR }}
+          TMDB_API_TOP=${{ secrets.TMDB_API_TOP }}
+          TMDB_API_UPCOMING=${{ secrets.TMDB_API_UPCOMING }}
+          TMDB_API_TRENDING=${{ secrets.TMDB_API_TRENDING }}
+          PG_USER=${{ secrets.PG_USER }}
+          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
+          PG_DB=${{ secrets.PG_DB }}
+          PG_PORT=${{ secrets.PG_PORT }}
+          EOF
 
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Run ETL container (generate CSV files)
-        run: docker-compose -f docker-compose.ci.yml up --build --exit-code-from app
+      - name: Run ETL
+        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
 
-      - name: List generated files
-        run: ls -l data || true
+      - name: List CSV files
+        run: ls -R data
 
-      - name: Commit updated CSV files
+      - name: Commit CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update TMDB multi-file CSV dataset"
-          file_pattern: data/*.csv
+          commit_message: "Update TMDB CSV files"
+          file_pattern: "data/*.csv"
           branch: main
 
       - name: Cleanup
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 
