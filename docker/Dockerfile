@@ -13,11 +13,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all project files into the container
+# Copy all project files
 COPY . .
 
-# Make the run script executable
-RUN chmod +x docker/run_pipeline.sh
+# FINAL FIX — run only main.py, no sh scripts
+CMD ["python", "src/main.py"]
 
-# Run the ETL pipeline (with schedule if provided)
-CMD ["sh", "docker/run_pipeline.sh"]
