@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env
+      - name: Create .env file
         run: |
           echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
           echo "PG_USER=${{ secrets.PG_USER }}" >> .env
@@ -23,7 +23,7 @@ jobs:
       - name: Install Docker Compose
         run: sudo apt-get install docker-compose -y
 
-      - name: Build WITHOUT cache (force new tqdm install)
+      - name: Build Docker image (CI)
         run: docker-compose -f docker-compose.ci.yml build --no-cache
 
       - name: Run ETL container
@@ -43,11 +43,12 @@ jobs:
           docker cp $CONTAINER_ID:/movie_details.csv data/movie_details.csv
           docker cp $CONTAINER_ID:/movie_credits.csv data/movie_credits.csv
 
-      - name: Commit updated CSV
+      - name: Commit updated CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           file_pattern: data/*.csv
           commit_message: "Update CSV files"
+
 
 
 
