@@ -13,18 +13,68 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env
+      - name: Create .env from secrets
         run: |
-          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
-          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
-          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
-          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
+          cat > .env <<EOF
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          PG_USER=${{ secrets.PG_USER }}
+          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
+          PG_DB=${{ secrets.PG_DB }}
+          PG_HOST=postgres
+          PG_PORT=5432
+          MAX_PAGES=${{ secrets.MAX_PAGES }}
+          SCHEDULE=0
+          EOF
+          echo "Created .env:"
+          cat .env
 
-      - name: Build Docker images
-        run: docker-compose -f docker-compose.ci.yml build --no-cache
+      - name: Show docker compose version
+        run: docker compose version
 
-      - name: Run ETL
-        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+      - name: Build Docker images (no cache)
+        run: docker compose -f docker-compose.ci.yml build --no-cache
+
+      - name: Run ETL container
+        env:
+          GITHUB_ACTIONS: "true"
+        run: docker compose -f docker-compose.ci.yml up --abort-on-container-exit
+
+      - name: Export CSV files from Postgres
+        env:
+          PG_USER: ${{ secrets.PG_USER }}
+          PG_DB: ${{ secrets.PG_DB }}
+        run: |
+          echo "Containers:"
+          docker ps -a
+
+          PG_CONTAINER=$(docker ps -a --filter "name=imdb_pipeline_postgres" --format "{{.ID}}" | head -n 1)
+          if [ -z "$PG_CONTAINER" ]; then
+            echo "Postgres container not found!"
+            exit 1
+          fi
+          echo "Using Postgres container: $PG_CONTAINER"
+
+          mkdir -p data
+
+          docker exec "$PG_CONTAINER" bash -c "psql -U \"$PG_USER\" -d \"$PG_DB\" -c \"\\\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER;\""
+          docker exec "$PG_CONTAINER" bash -c "psql -U \"$PG_USER\" -d \"$PG_DB\" -c \"\\\\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;\""
+          docker exec "$PG_CONTAINER" bash -c "psql -U \"$PG_USER\" -d \"$PG_DB\" -c \"\\\\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;\""
+
+          docker cp "$PG_CONTAINER":/tmp/popular_movies.csv data/popular_movies.csv
+          docker cp "$PG_CONTAINER":/tmp/movie_details.csv data/movie_details.csv
+          docker cp "$PG_CONTAINER":/tmp/movie_credits.csv data/movie_credits.csv
+
+      - name: Commit updated CSVs
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          file_pattern: data/*.csv
+          commit_message: "Update TMDB CSV files"
+          branch: main
+
+      - name: Tear down containers
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down --volumes
+
 
 
 
