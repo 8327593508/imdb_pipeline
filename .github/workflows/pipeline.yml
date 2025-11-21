@@ -1,30 +1,85 @@
 name: Daily TMDB Multi-File ETL
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:      # manual run button
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * *"   # every day 06:00 UTC
 
 jobs:
   etl:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Get repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env
+      # 2. Build .env from GitHub secrets
+      - name: Create .env from secrets
         run: |
-          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
-          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
-          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
-          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
+          cat > .env <<EOF
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          PG_USER=${{ secrets.PG_USER }}
+          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
+          PG_DB=${{ secrets.PG_DB }}
+          PG_HOST=postgres
+          PG_PORT=5432
+          MAX_PAGES=${{ secrets.MAX_PAGES }}
+          SCHEDULE=0
+          EOF
+          echo "Generated .env:"
+          cat .env
 
+      # 3. Build images (NOTE: docker *compose*, not docker-compose)
       - name: Build Docker images
-        run: docker-compose -f docker-compose.ci.yml build --no-cache
+        run: docker compose -f docker-compose.ci.yml build
 
+      # 4. Run ETL once and stop
       - name: Run ETL
-        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+        run: docker compose -f docker-compose.ci.yml up --abort-on-container-exit
+
+      # 5. Export CSVs from Postgres container
+      - name: Export CSV files
+        run: |
+          echo "Containers:"
+          docker ps -a
+
+          # find Postgres container
+          CONTAINER_ID=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
+          echo "Postgres container: $CONTAINER_ID"
+
+          docker start "$CONTAINER_ID"
+
+          mkdir -p data
+
+          # popular_movies
+          docker exec "$CONTAINER_ID" bash -c \
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER;\""
+          docker cp "$CONTAINER_ID":/tmp/popular_movies.csv data/popular_movies.csv
+
+          # movie_details
+          docker exec "$CONTAINER_ID" bash -c \
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;\""
+          docker cp "$CONTAINER_ID":/tmp/movie_details.csv data/movie_details.csv
+
+          # movie_credits
+          docker exec "$CONTAINER_ID" bash -c \
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;\""
+          docker cp "$CONTAINER_ID":/tmp/movie_credits.csv data/movie_credits.csv
+
+      # 6. Commit CSVs back into repo
+      - name: Commit updated CSVs
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          file_pattern: data/*.csv
+          commit_message: "Update TMDB CSV files"
+          branch: main
+
+      # 7. Cleanup containers
+      - name: Tear down containers
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down --volumes
+
 
 
 
