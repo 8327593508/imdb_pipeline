@@ -1,31 +1,101 @@
-from src.utils.db_engine import get_engine
+# src/main.py
+
+import os
+import sys
+from config.config import MAX_PAGES, SCHEDULE, TMDB_API_KEY
+from src.extract.tmdb_master_extract import extract_all_categories
+from src.transform.transform_movies import transform_movies
+from src.transform.transform_movie_details import transform_movie_details
+from src.transform.transform_movie_credits import transform_movie_credits
+from src.load.load_to_postgres import upsert_movies
+from src.load.load_movie_details import upsert_movie_details
+from src.load.load_movie_credits import upsert_movie_credits
 from src.utils.logger import get_logger
+import time
 
-logger = get_logger("load_movie_credits")
+logger = get_logger("main")
 
 
-def upsert_movie_credits(df_credits):
-    engine = get_engine()
-    conn = engine.raw_connection()
-    cursor = conn.cursor()
-
-    for _, row in df_credits.iterrows():   # FIXED
-
-        values = (
-            int(row["movie_id"]),
-            row["movie_cast"],
-            row["movie_crew"]
+def run_once():
+    """Execute ETL pipeline once."""
+    logger.info("=== Starting TMDB multi-file ETL run ===")
+    
+    # Validate API key
+    if not TMDB_API_KEY or TMDB_API_KEY == "":
+        logger.error("TMDB_API_KEY is not set in environment!")
+        sys.exit(1)
+    
+    logger.info(f"Using MAX_PAGES: {MAX_PAGES}")
+    
+    try:
+        logger.info("Step 1: Extracting data from TMDB API...")
+        data = extract_all_categories(
+            pages_popular=MAX_PAGES,
+            pages_top=MAX_PAGES,
+            pages_upcoming=2,
+            pages_trending=2
         )
+        
+        popular_movies = data.get("popular", [])
+        details_list = data.get("details", [])
+        credits_list = data.get("credits", [])
+        
+        logger.info(f"Extracted: {len(popular_movies)} popular, {len(details_list)} details, {len(credits_list)} credits")
+        
+        # Transform
+        logger.info("Step 2: Transforming popular movies...")
+        df_movies = transform_movies(popular_movies)
+        
+        logger.info("Step 3: Transforming movie details...")
+        df_details = transform_movie_details(details_list)
+        
+        logger.info("Step 4: Transforming movie credits...")
+        df_credits = transform_movie_credits(credits_list)
+        
+        # Load
+        logger.info("Step 5: Loading into Postgres...")
+        upsert_movies(df_movies)
+        upsert_movie_details(df_details)
+        upsert_movie_credits(df_credits)
+        
+        logger.info("=== ETL COMPLETED SUCCESSFULLY ===")
+        
+    except Exception as e:
+        logger.error(f"ETL failed with error: {e}", exc_info=True)
+        sys.exit(1)
 
-        cursor.execute("""
-            INSERT INTO movie_credits (movie_id, movie_cast, movie_crew)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (movie_id)
-            DO UPDATE SET
-                movie_cast = EXCLUDED.movie_cast,
-                movie_crew = EXCLUDED.movie_crew;
-        """, values)
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+def run_loop():
+    """Local-only: repeatedly run ETL based on SCHEDULE seconds."""
+    try:
+        interval = int(SCHEDULE) if SCHEDULE else 3600
+    except Exception:
+        logger.error("SCHEDULE must be an integer number of seconds.")
+        interval = 3600
+    
+    logger.info(f"Starting ETL loop with {interval} second interval...")
+    
+    while True:
+        try:
+            run_once()
+        except Exception as e:
+            logger.error(f"Error in loop iteration: {e}")
+        
+        logger.info(f"Sleeping for {interval} seconds before next run...")
+        time.sleep(interval)
+
+
+if __name__ == "__main__":
+    # In GitHub Actions we set GITHUB_ACTIONS=true so it runs once
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        logger.info("Running in GitHub Actions mode (single run)")
+        run_once()
+    else:
+        # Local mode: check if we should loop or run once
+        schedule_val = os.environ.get("SCHEDULE", "0")
+        if schedule_val and str(schedule_val).isdigit() and int(schedule_val) > 0:
+            logger.info("Running in loop mode")
+            run_loop()
+        else:
+            logger.info("Running in single-run mode")
+            run_once()
