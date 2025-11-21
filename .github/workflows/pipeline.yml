@@ -3,51 +3,29 @@ name: Daily TMDB Multi-File ETL
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 6 * * *"
 
 jobs:
-  run-etl:
+  etl:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set CACHEBUST (forces clean Docker rebuild)
-        run: echo "CACHEBUST=$(date +%s)" >> $GITHUB_ENV
+      - name: Create .env
+        run: |
+          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
+          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
+          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
 
-      - name: Install Docker Compose
-        run: sudo apt-get update && sudo apt-get install docker-compose -y
-
-      - name: Build ETL container (NO CACHE)
+      - name: Build Docker images
         run: docker-compose -f docker-compose.ci.yml build --no-cache
 
-      - name: Run ETL container
-        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit --exit-code-from app
+      - name: Run ETL
+        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
 
-      - name: Export CSV files from Postgres
-        run: |
-          echo "Finding Postgres container..."
-          CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
-          echo "Postgres container: $CONTAINER"
-
-          echo "Exporting files..."
-          docker exec $CONTAINER psql -U $PG_USER -d $PG_DB -c "\COPY movie_details TO '/data/movie_details.csv' CSV HEADER;"
-          docker exec $CONTAINER psql -U $PG_USER -d $PG_DB -c "\COPY movie_credits TO '/data/movie_credits.csv' CSV HEADER;"
-          docker exec $CONTAINER psql -U $PG_USER -d $PG_DB -c "\COPY popular_movies TO '/data/popular_movies.csv' CSV HEADER;"
-
-          docker cp $CONTAINER:/data/movie_details.csv data/movie_details.csv
-          docker cp $CONTAINER:/data/movie_credits.csv data/movie_credits.csv
-          docker cp $CONTAINER:/data/popular_movies.csv data/popular_movies.csv
-
-      - name: Commit updated CSV files
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "Update CSV files"
-          file_pattern: data/*.csv
-
-      - name: Cleanup
-        run: docker-compose -f docker-compose.ci.yml down --volumes
 
 
 
