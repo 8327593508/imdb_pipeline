@@ -1,27 +1,20 @@
- feature/multi-file-tmdb
-# docker/Dockerfile
-
- main
 FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Copy requirements first
 COPY requirements.txt .
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copy ENTIRE project (INCLUDING src folder)
 COPY . .
 
- feature/multi-file-tmdb
+# Ensure Python can import the src package
+ENV PYTHONPATH="/app"
+
 CMD ["python", "-u", "src/main.py"]
 
-
-
-
-# Run the ETL
-CMD ["python", "-u", "src/main.py"]
- main
 
 
 
