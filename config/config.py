@@ -1,21 +1,53 @@
-from dotenv import load_dotenv
 import os
-from pathlib import Path
+from dotenv import load_dotenv
 
-# Load .env file from project root
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(dotenv_path=ROOT / '.env')
+# Load .env file inside Docker container
+load_dotenv()
 
-# TMDB Settings
-TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
-# PostgreSQL Settings
-PG_USER = os.getenv('PG_USER', 'postgres')
-PG_PASSWORD = os.getenv('PG_PASSWORD', '')
-PG_HOST = os.getenv('PG_HOST', 'localhost')
-PG_DB = os.getenv('PG_DB', 'tmdb_db')
-PG_PORT = os.getenv('PG_PORT', '5432')
+# -------- Helper Functions -------- #
 
-# Pipeline Settings
-MAX_PAGES = int(os.getenv('MAX_PAGES', '5'))
-SCHEDULE = os.getenv('SCHEDULE')  # seconds or empty
+def get_str_env(name: str, default: str = "") -> str:
+    """
+    Safely retrieve a string environment variable.
+    If not present or empty, return default.
+    """
+    value = os.getenv(name, "").strip()
+    return value if value else default
+
+
+def get_int_env(name: str, default: int = 0) -> int:
+    """
+    Safely retrieve an integer environment variable.
+    If conversion fails or missing, return default.
+    """
+    value = os.getenv(name, "").strip()
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+# -------- TMDB API Keys -------- #
+TMDB_API_KEY = get_str_env("TMDB_API_KEY", "")
+
+# You may use different keys later if needed:
+TMDB_API_POPULAR = get_str_env("TMDB_API_POPULAR", TMDB_API_KEY)
+TMDB_API_TOP = get_str_env("TMDB_API_TOP", TMDB_API_KEY)
+
+
+# -------- PostgreSQL Credentials -------- #
+PG_USER = get_str_env("PG_USER", "postgres")
+PG_PASSWORD = get_str_env("PG_PASSWORD", "")
+PG_DB = get_str_env("PG_DB", "tmdb")
+PG_PORT = get_int_env("PG_PORT", 5432)
+
+
+# -------- Extract Settings -------- #
+
+# Default to 5 pages if environment variable missing
+MAX_PAGES = get_int_env("MAX_PAGES", 5)
+
+# Schedule used only if your code references it
+SCHEDULE = get_str_env("SCHEDULE", "0 6 * * *")
+
