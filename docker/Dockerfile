@@ -1,17 +1,15 @@
+# docker/Dockerfile
 FROM python:3.10-slim
 
 WORKDIR /app
 
-# Copy requirements first
-COPY requirements.txt .
+# Copy requirements from project root (one level up)
+COPY ../requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy ENTIRE project (INCLUDING src folder)
-COPY . .
-
-# Ensure Python can import the src package
-ENV PYTHONPATH="/app"
+# Copy the entire project root into the container
+COPY ../ .
 
 CMD ["python", "-u", "src/main.py"]
 
