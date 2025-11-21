@@ -1,23 +1,31 @@
-version: "3.9"
+version: "3.8"
 
 services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_DB: ${PG_DB}
-    ports:
-      - "5432:5432"
-
   app:
     build:
       context: .
-      dockerfile: docker/Dockerfile
-    environment:
-      GITHUB_ACTIONS: "true"
+      dockerfile: docker/Dockerfile   # THIS IS THE ONLY DOCKERFILE USED
+    env_file:
+      - .env
     depends_on:
       - postgres
+    command: ["python", "-u", "src/main.py"]
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: "${PG_USER}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD}"
+      POSTGRES_DB: "${PG_DB}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
+
+volumes:
+  postgres_data:
 
 
 
