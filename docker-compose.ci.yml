@@ -4,14 +4,26 @@ services:
   app:
     build:
       context: .
-      dockerfile: docker/Dockerfile
-    container_name: tmdb_app_ci
+      dockerfile: docker/Dockerfile   # uses your correct file
+      args:
+        CACHEBUST: ${CACHEBUST}       # busts Docker cache
     env_file:
       - .env
     environment:
       GITHUB_ACTIONS: "true"
-    command: >
-      sh -c "python -u src/main.py"
+    volumes:
+      - .:/app
+    command: ["python", "-u", "src/main.py"]
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB}
+    ports:
+      - "5432:5432"
+
 
 
 
