@@ -3,90 +3,52 @@ name: Daily TMDB Multi-File ETL
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "0 6 * * *"
 
 jobs:
-  run-etl:
+  etl:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------------------------
-      # Checkout repository
-      # ---------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------------------------
-      # Create .env file from Secrets
-      # ---------------------------
-      - name: Create .env from secrets
+      - name: Create .env
         run: |
-          cat > .env <<EOF
-          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
-          PG_USER=${{ secrets.PG_USER }}
-          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
-          PG_DB=${{ secrets.PG_DB }}
-          PG_PORT=${{ secrets.PG_PORT }}
-          MAX_PAGES=${{ secrets.MAX_PAGES }}
-          SCHEDULE=0
-          EOF
+          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
+          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
+          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
 
-      # ---------------------------
-      # Install Docker Compose
-      # ---------------------------
       - name: Install Docker Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
+        run: sudo apt-get install docker-compose -y
 
-      # ---------------------------
-      # Build & Run ETL
-      # ---------------------------
-      - name: Run ETL container (generate CSV files)
-        run: |
-          docker-compose -f docker-compose.ci.yml build --no-cache
-          docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+      - name: Build WITHOUT cache (force new tqdm install)
+        run: docker-compose -f docker-compose.ci.yml build --no-cache
 
-      # ---------------------------
-      # Export CSV files from Postgres
-      # ---------------------------
+      - name: Run ETL container
+        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+
       - name: Export CSV files
         run: |
-          echo "Searching for Postgres container..."
-          CONTAINER=$(docker ps -a --filter "ancestor=postgres:15" --format "{{.ID}}" | head -n 1)
+          CONTAINER_ID=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
+          echo "Postgres container: $CONTAINER_ID"
+          docker start $CONTAINER_ID
 
-          echo "Postgres container = $CONTAINER"
+          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY popular_movies TO '/popular_movies.csv' CSV HEADER;\""
+          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY movie_details TO '/movie_details.csv' CSV HEADER;\""
+          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY movie_credits TO '/movie_credits.csv' CSV HEADER;\""
 
-          echo "Exporting popular_movies.csv..."
-          docker exec $CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c "\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;"
+          docker cp $CONTAINER_ID:/popular_movies.csv data/popular_movies.csv
+          docker cp $CONTAINER_ID:/movie_details.csv data/movie_details.csv
+          docker cp $CONTAINER_ID:/movie_credits.csv data/movie_credits.csv
 
-          echo "Exporting movie_details.csv..."
-          docker exec $CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c "\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;"
-
-          echo "Exporting movie_credits.csv..."
-          docker exec $CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c "\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;"
-
-          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
-          docker cp $CONTAINER:/tmp/movie_details.csv ./data/movie_details.csv
-          docker cp $CONTAINER:/tmp/movie_credits.csv ./data/movie_credits.csv
-
-      # ---------------------------
-      # Auto Commit
-      # ---------------------------
-      - name: Commit updated CSV files
+      - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update TMDB CSV files"
-          file_pattern: "data/*.csv"
+          file_pattern: data/*.csv
+          commit_message: "Update CSV files"
 
-      # ---------------------------
-      # Cleanup
-      # ---------------------------
-      - name: Cleanup
-        run: docker-compose -f docker-compose.ci.yml down --volumes
 
 
 

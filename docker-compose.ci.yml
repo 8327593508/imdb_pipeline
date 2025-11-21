@@ -1,33 +1,24 @@
 version: "3.9"
 
 services:
-
   postgres:
     image: postgres:15
-    container_name: tmdb_postgres_ci
     environment:
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: ${PG_DB}
     ports:
-      - "${PG_PORT}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER}"]
-      interval: 5s
-      retries: 10
+      - "5432:5432"
 
   app:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: tmdb_app_ci
-    env_file:
-      - .env
+    environment:
+      GITHUB_ACTIONS: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
-    command: >
-      sh -c "python -u src/main.py"
+      - postgres
+
 
 
 
