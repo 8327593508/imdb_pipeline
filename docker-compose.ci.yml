@@ -4,11 +4,23 @@ services:
   app:
     build:
       context: .
+ feature/multi-file-tmdb
+      dockerfile: docker/Dockerfile   # uses your correct file
+      args:
+        CACHEBUST: ${CACHEBUST}       # busts Docker cache
+    env_file:
+      - .env
+    environment:
+      GITHUB_ACTIONS: "true"
+    volumes:
+      - .:/app
+
       dockerfile: docker/Dockerfile   # THIS IS THE ONLY DOCKERFILE USED
     env_file:
       - .env
     depends_on:
       - postgres
+ main
     command: ["python", "-u", "src/main.py"]
 
   postgres:
@@ -24,8 +36,12 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
 
+ feature/multi-file-tmdb
+
+
 volumes:
   postgres_data:
+ main
 
 
 
