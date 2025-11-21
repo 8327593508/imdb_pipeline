@@ -1,84 +1,59 @@
 name: Daily TMDB Multi-File ETL
 
 on:
-  workflow_dispatch:      # manual run button
+  workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"   # every day 06:00 UTC
+    - cron: "0 6 * * *"
 
 jobs:
   etl:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Get repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Build .env from GitHub secrets
-      - name: Create .env from secrets
+      - name: Create .env
         run: |
-          cat > .env <<EOF
-          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
-          PG_USER=${{ secrets.PG_USER }}
-          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
-          PG_DB=${{ secrets.PG_DB }}
-          PG_HOST=postgres
-          PG_PORT=5432
-          MAX_PAGES=${{ secrets.MAX_PAGES }}
-          SCHEDULE=0
-          EOF
-          echo "Generated .env:"
-          cat .env
+          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
+          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
+          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
 
-      # 3. Build images (NOTE: docker *compose*, not docker-compose)
+      # ⚠️ docker compose v2 is BUILT-IN — DO NOT install anything
+
       - name: Build Docker images
-        run: docker compose -f docker-compose.ci.yml build
+        run: docker compose -f docker-compose.ci.yml build --no-cache
 
-      # 4. Run ETL once and stop
       - name: Run ETL
         run: docker compose -f docker-compose.ci.yml up --abort-on-container-exit
 
-      # 5. Export CSVs from Postgres container
       - name: Export CSV files
         run: |
-          echo "Containers:"
-          docker ps -a
+          PG_CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
+          echo "Postgres container: $PG_CONTAINER"
 
-          # find Postgres container
-          CONTAINER_ID=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
-          echo "Postgres container: $CONTAINER_ID"
+          docker start $PG_CONTAINER
 
-          docker start "$CONTAINER_ID"
+          docker exec $PG_CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c "COPY popular_movies TO '/popular_movies.csv' CSV HEADER;"
 
-          mkdir -p data
+          docker exec $PG_CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c "COPY movie_details TO '/movie_details.csv' CSV HEADER;"
 
-          # popular_movies
-          docker exec "$CONTAINER_ID" bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER;\""
-          docker cp "$CONTAINER_ID":/tmp/popular_movies.csv data/popular_movies.csv
+          docker exec $PG_CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c "COPY movie_credits TO '/movie_credits.csv' CSV HEADER;"
 
-          # movie_details
-          docker exec "$CONTAINER_ID" bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;\""
-          docker cp "$CONTAINER_ID":/tmp/movie_details.csv data/movie_details.csv
+          docker cp $PG_CONTAINER:/popular_movies.csv data/popular_movies.csv
+          docker cp $PG_CONTAINER:/movie_details.csv data/movie_details.csv
+          docker cp $PG_CONTAINER:/movie_credits.csv data/movie_credits.csv
 
-          # movie_credits
-          docker exec "$CONTAINER_ID" bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;\""
-          docker cp "$CONTAINER_ID":/tmp/movie_credits.csv data/movie_credits.csv
-
-      # 6. Commit CSVs back into repo
-      - name: Commit updated CSVs
+      - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           file_pattern: data/*.csv
-          commit_message: "Update TMDB CSV files"
-          branch: main
+          commit_message: "Daily update CSV files (auto)"
 
-      # 7. Cleanup containers
-      - name: Tear down containers
-        if: always()
-        run: docker compose -f docker-compose.ci.yml down --volumes
 
 
 
