@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS movie_details (
     backdrop_path TEXT,
     original_language TEXT,
     genres JSONB,
-    runtime INTEGER,
+    runtime INT,
     budget BIGINT,
     revenue BIGINT,
     homepage TEXT,
@@ -38,4 +38,3 @@ CREATE TABLE IF NOT EXISTS movie_credits (
     cast JSONB,
     crew JSONB
 );
-

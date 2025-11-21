@@ -6,75 +6,58 @@ from src.extract.tmdb_extract_movies import (
     fetch_upcoming_movies,
     fetch_trending_movies,
 )
+
 from src.extract.tmdb_extract_details import fetch_movie_details
 from src.extract.tmdb_extract_credits import fetch_movie_credits
-
-from src.utils.logger import get_logger
 import time
-from tqdm import tqdm  # progress bar
+from src.utils.logger import get_logger
 
 logger = get_logger("tmdb_master_extract")
 
 
-def extract_all_categories(
-    pages_popular=200,
-    pages_top=200,
-    pages_upcoming=50,
-    pages_trending=50
+# STEP 1 — Fetch MOVIE IDs from multiple endpoints
+def extract_all_movie_ids(
+    pages_popular=5, pages_top=5, pages_upcoming=5, pages_trending=5
 ):
-    """
-    Extracts movie IDs from 4 TMDB categories:
-        - Popular
-        - Top Rated
-        - Upcoming
-        - Trending
+    logger.info("Fetching all movie lists...")
 
-    Then fetches FULL details + credits for each movie and returns:
-        movies_details, movies_credits
-    """
-
-    logger.info("Fetching movie lists from TMDB...")
-
-    # FETCH MOVIE LISTS
     popular = fetch_popular_movies(pages_popular)
     top_rated = fetch_top_rated_movies(pages_top)
     upcoming = fetch_upcoming_movies(pages_upcoming)
     trending = fetch_trending_movies(pages_trending)
 
-    logger.info("Collecting movie IDs from all categories...")
+    all_ids = set(
+        [m["id"] for m in popular]
+        + [m["id"] for m in top_rated]
+        + [m["id"] for m in upcoming]
+        + [m["id"] for m in trending]
+    )
 
-    # Extract movie IDs
-    all_ids = set()
+    logger.info(f"Total unique Movie IDs collected = {len(all_ids)}")
+    return list(all_ids)
 
-    for row in (popular + top_rated + upcoming + trending):
-        if "id" in row:
-            all_ids.add(row["id"])
 
-    logger.info(f"Total unique movie IDs found: {len(all_ids)}")
+# STEP 2 — Fetch DETAILS and CREDITS for each movie
+def extract_all_categories(movie_ids):
+    logger.info("Fetching MOVIE DETAILS + CREDITS for each movie")
 
-    movies_details = []
-    movies_credits = []
+    movie_details = []
+    movie_credits = []
 
-    logger.info("Fetching FULL details + credits for each movie...")
-
-    # Fetch full metadata
-    for movie_id in tqdm(all_ids, desc="Processing movie"):
+    # Normal Python loop — tqdm removed  
+    for movie_id in movie_ids:
         details = fetch_movie_details(movie_id)
         credits = fetch_movie_credits(movie_id)
 
         if details:
-            movies_details.append(details)
-
+            movie_details.append(details)
         if credits:
-            movies_credits.append(credits)
+            movie_credits.append(credits)
 
-        # small delay to avoid rate limiting
-        time.sleep(0.15)
+        # Prevent hitting TMDB rate limit
+        time.sleep(0.25)
 
-    logger.info(
-        f"Extracted details: {len(movies_details)} | credits: {len(movies_credits)}"
-    )
+    return movie_details, movie_credits
 
-    return movies_details, movies_credits
 
 
