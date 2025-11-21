@@ -1,64 +1,93 @@
 name: Daily TMDB Multi-File ETL
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "0 4 * * *"
-  workflow_dispatch:
 
 jobs:
-  etl:
+  run-etl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      # ---------------------------
+      # Checkout repository
+      # ---------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env from Secrets
+      # ---------------------------
+      # Create .env file from Secrets
+      # ---------------------------
+      - name: Create .env from secrets
         run: |
           cat > .env <<EOF
           TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
           PG_USER=${{ secrets.PG_USER }}
           PG_PASSWORD=${{ secrets.PG_PASSWORD }}
           PG_DB=${{ secrets.PG_DB }}
-          PG_PORT=5432
+          PG_PORT=${{ secrets.PG_PORT }}
+          MAX_PAGES=${{ secrets.MAX_PAGES }}
           SCHEDULE=0
           EOF
 
+      # ---------------------------
+      # Install Docker Compose
+      # ---------------------------
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Run ETL container
-        run: docker-compose -f docker-compose.ci.yml up --build --abort-on-container-exit
-
-      - name: Export CSVs from Postgres
+      # ---------------------------
+      # Build & Run ETL
+      # ---------------------------
+      - name: Run ETL container (generate CSV files)
         run: |
-          CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
+          docker-compose -f docker-compose.ci.yml build --no-cache
+          docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+
+      # ---------------------------
+      # Export CSV files from Postgres
+      # ---------------------------
+      - name: Export CSV files
+        run: |
+          echo "Searching for Postgres container..."
+          CONTAINER=$(docker ps -a --filter "ancestor=postgres:15" --format "{{.ID}}" | head -n 1)
+
           echo "Postgres container = $CONTAINER"
 
-          docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER;\""
+          echo "Exporting popular_movies.csv..."
+          docker exec $CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c "\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) TO '/tmp/popular_movies.csv' CSV HEADER;"
 
-          docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;\""
+          echo "Exporting movie_details.csv..."
+          docker exec $CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c "\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER;"
 
-          docker exec $CONTAINER bash -c \
-            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} -c \"\\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;\""
+          echo "Exporting movie_credits.csv..."
+          docker exec $CONTAINER psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c "\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER;"
 
           docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
           docker cp $CONTAINER:/tmp/movie_details.csv ./data/movie_details.csv
           docker cp $CONTAINER:/tmp/movie_credits.csv ./data/movie_credits.csv
 
-      - name: Commit updated CSVs
+      # ---------------------------
+      # Auto Commit
+      # ---------------------------
+      - name: Commit updated CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: "Update TMDB CSV files"
           file_pattern: "data/*.csv"
-          branch: main
 
+      # ---------------------------
+      # Cleanup
+      # ---------------------------
       - name: Cleanup
         run: docker-compose -f docker-compose.ci.yml down --volumes
+
 
 
 
