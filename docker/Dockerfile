@@ -2,24 +2,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies needed for psycopg2
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpq-dev \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+# Fix pip + ensure cache is clean
+RUN pip install --upgrade pip && pip cache purge
 
-# Install Python dependencies
+# Install system deps
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
+# Copy ONLY requirements first (better caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the project
+# Force install INCLUDING tqdm
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip show tqdm || (echo "tqdm missing!" && exit 1)
+
+# Now copy project files
 COPY . .
 
-# FIX: Ensure Python can import src/*
-ENV PYTHONPATH="/app"
-
-# Run ETL correctly
 CMD ["python", "src/main.py"]
+
+
+
+
 
 

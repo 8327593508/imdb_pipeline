@@ -1,48 +1,58 @@
 name: Daily TMDB Multi-File ETL
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *"     # runs daily at 04:00 UTC
-  workflow_dispatch:        # allow manual run
+    - cron: "0 6 * * *"
 
 jobs:
-  run-etl:
+  etl:
     runs-on: ubuntu-latest
 
     steps:
-
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env from secrets
+      - name: Create .env
         run: |
           echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
-          echo "MAX_PAGES=${{ secrets.MAX_PAGES }}" >> .env
-          echo "PAGES_POPULAR=${{ secrets.PAGES_POPULAR }}" >> .env
-          echo "PAGES_TOP=${{ secrets.PAGES_TOP }}" >> .env
-          echo "PAGES_UPCOMING=${{ secrets.PAGES_UPCOMING }}" >> .env
-          echo "PAGES_TRENDING=${{ secrets.PAGES_TRENDING }}" >> .env
+          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
+          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
+          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
 
       - name: Install Docker Compose
+        run: sudo apt-get install docker-compose -y
+
+      - name: Build WITHOUT cache (force new tqdm install)
+        run: docker-compose -f docker-compose.ci.yml build --no-cache
+
+      - name: Run ETL container
+        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+
+      - name: Export CSV files
         run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
+          CONTAINER_ID=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
+          echo "Postgres container: $CONTAINER_ID"
+          docker start $CONTAINER_ID
 
-      - name: Run ETL container (generate CSV files)
-        run: docker-compose -f docker-compose.ci.yml up --build --exit-code-from app
+          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY popular_movies TO '/popular_movies.csv' CSV HEADER;\""
+          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY movie_details TO '/movie_details.csv' CSV HEADER;\""
+          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY movie_credits TO '/movie_credits.csv' CSV HEADER;\""
 
-      - name: List generated files
-        run: ls -l data || true
+          docker cp $CONTAINER_ID:/popular_movies.csv data/popular_movies.csv
+          docker cp $CONTAINER_ID:/movie_details.csv data/movie_details.csv
+          docker cp $CONTAINER_ID:/movie_credits.csv data/movie_credits.csv
 
-      - name: Commit updated CSV files
+      - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: "Update TMDB multi-file CSV dataset"
           file_pattern: data/*.csv
-          branch: main
+          commit_message: "Update CSV files"
 
-      - name: Cleanup
-        run: docker-compose -f docker-compose.ci.yml down --volumes
+
+
+
+
 
 
 

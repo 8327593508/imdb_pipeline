@@ -1,18 +1,25 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB}
+    ports:
+      - "5432:5432"
+
   app:
-    container_name: tmdb_app_ci
     build:
       context: .
       dockerfile: docker/Dockerfile
-    env_file:
-      - .env
     environment:
-      GITHUB_ACTIONS: "true"   # Forces main.py → run once
-    volumes:
-      - ./data:/app/data       # Make sure CSVs are saved in repo
-    command: >
-      sh -c "python -u src/main.py"
+      GITHUB_ACTIONS: "true"
+    depends_on:
+      - postgres
+
+
+
 
 

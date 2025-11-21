@@ -1,44 +1,48 @@
 # src/main.py
-import os
-import pandas as pd
 
-from src.extract.tmdb_master_extract import extract_all_categories
+import os
+from src.extract.tmdb_master_extract import (
+    extract_all_movie_ids,
+    extract_all_categories,
+)
+from src.transform.transform_movies import transform_movies
+from src.transform.transform_movie_details import transform_movie_details
+from src.transform.transform_movie_credits import transform_movie_credits
+from src.load.load_to_postgres import upsert_movies
+from src.load.load_movie_details import upsert_movie_details
+from src.load.load_movie_credits import upsert_movie_credits
 from src.utils.logger import get_logger
 
 logger = get_logger("main")
 
 
 def run_once():
-    logger.info("=== Starting FULL TMDB extraction ===")
+    logger.info("=== Starting TMDB Multi-File ETL ===")
 
-    # Extract 4 datasets
-    df_popular, df_top, df_upcoming, df_trending = extract_all_categories(
-        pages_popular=MAX_PAGES,
-        pages_top=MAX_PAGES,
-        pages_upcoming=30,
-        pages_trending=30
-    )
+    # Step 1: Collect movie IDs
+    movie_ids = extract_all_movie_ids()
 
-    # Ensure data directory exists
-    os.makedirs("data", exist_ok=True)
+    # Step 2: Fetch details + credits
+    details, credits = extract_all_categories(movie_ids)
 
-    # Save 4 separate CSVs
-    df_popular.to_csv("data/popular_movies.csv", index=False)
-    df_top.to_csv("data/top_rated_movies.csv", index=False)
-    df_upcoming.to_csv("data/upcoming_movies.csv", index=False)
-    df_trending.to_csv("data/trending_movies.csv", index=False)
+    # Step 3: Transform all
+    df_movies = transform_movies(movie_ids)
+    df_details = transform_movie_details(details)
+    df_credits = transform_movie_credits(credits)
 
-    logger.info("Saved all CSV files successfully!")
-    logger.info("=== Extraction completed ===")
+    # Step 4: Load all
+    upsert_movies(df_movies)
+    upsert_movie_details(df_details)
+    upsert_movie_credits(df_credits)
+
+    logger.info("=== ETL COMPLETED SUCCESSFULLY ===")
 
 
 if __name__ == "__main__":
-    # Force run ONCE in GitHub Actions
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        run_once()
-    else:
-        # Local mode: always run once
-        run_once()
+    run_once()
+
+
+
 
 
 
