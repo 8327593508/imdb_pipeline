@@ -13,7 +13,7 @@ def extract_movie_credits(movie_id: int):
     url = BASE_URL.format(movie_id=movie_id)
     params = {"api_key": TMDB_API_KEY}
 
-      session = create_retry_session()
+    session = create_retry_session()
 
     logger.info(f"Fetching credits for movie_id={movie_id}")
     response = session.get(url, params=params)
