@@ -1,47 +1,35 @@
-version: "3.8"
+version: "3.9"
 
 services:
   app:
     build:
       context: .
- feature/multi-file-tmdb
-      dockerfile: docker/Dockerfile   # uses your correct file
-      args:
-        CACHEBUST: ${CACHEBUST}       # busts Docker cache
-    env_file:
-      - .env
+      dockerfile: docker/Dockerfile
     environment:
-      GITHUB_ACTIONS: "true"
-    volumes:
-      - .:/app
-
-      dockerfile: docker/Dockerfile   # THIS IS THE ONLY DOCKERFILE USED
-    env_file:
-      - .env
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DB: tmdb
     depends_on:
       - postgres
- main
-    command: ["python", "-u", "src/main.py"]
 
   postgres:
-    image: postgres:15
+    image: postgres:14
     restart: always
     environment:
-      POSTGRES_USER: "${PG_USER}"
-      POSTGRES_PASSWORD: "${PG_PASSWORD}"
-      POSTGRES_DB: "${PG_DB}"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tmdb
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
-
- feature/multi-file-tmdb
-
 
 volumes:
   postgres_data:
- main
+
 
 
 
