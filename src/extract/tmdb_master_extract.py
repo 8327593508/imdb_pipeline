@@ -37,16 +37,37 @@ def extract_all_categories(
     if pages_top is None:
         pages_top = MAX_PAGES
     if pages_upcoming is None:
-        pages_upcoming = 3
+        pages_upcoming = 2
     if pages_trending is None:
-        pages_trending = 3
+        pages_trending = 2
 
-    logger.info("Fetching category movie lists...")
+    logger.info("Fetching movie lists from TMDB...")
 
-    popular = fetch_popular_movies(pages_popular)
-    top_rated = fetch_top_rated_movies(pages_top)
-    upcoming = fetch_upcoming_movies(pages_upcoming)
-    trending = fetch_trending_movies(pages_trending)
+    # Fetch paginated results
+    popular = []
+    top_rated = []
+    upcoming = []
+    trending = []
+
+    for page in range(1, pages_popular + 1):
+        logger.info(f"Fetching popular movies page {page}/{pages_popular}")
+        popular.extend(fetch_popular_movies(page))
+        time.sleep(0.25)
+
+    for page in range(1, pages_top + 1):
+        logger.info(f"Fetching top_rated movies page {page}/{pages_top}")
+        top_rated.extend(fetch_top_rated_movies(page))
+        time.sleep(0.25)
+
+    for page in range(1, pages_upcoming + 1):
+        logger.info(f"Fetching upcoming movies page {page}/{pages_upcoming}")
+        upcoming.extend(fetch_upcoming_movies(page))
+        time.sleep(0.25)
+
+    for page in range(1, pages_trending + 1):
+        logger.info(f"Fetching trending movies page {page}/{pages_trending}")
+        trending.extend(fetch_trending_movies(page))
+        time.sleep(0.25)
 
     # Build set of unique IDs across all categories
     movie_ids = set()
@@ -65,9 +86,14 @@ def extract_all_categories(
     details_list: list[dict] = []
     credits_list: list[dict] = []
 
-    logger.info("Fetching details + credits for each movie...")
+    logger.info(f"Fetching details + credits for {len(movie_ids)} movies...")
 
+    count = 0
     for movie_id in movie_ids:
+        count += 1
+        if count % 50 == 0:
+            logger.info(f"Progress: {count}/{len(movie_ids)}")
+
         # Details
         d = fetch_movie_details(movie_id)
         if d:
@@ -76,16 +102,12 @@ def extract_all_categories(
         # Credits
         c = fetch_movie_credits(movie_id)
         if c:
-            credits_list.append(
-                {
-                    "movie_id": movie_id,
-                    "cast": c.get("cast"),
-                    "crew": c.get("crew"),
-                }
-            )
+            credits_list.append(c)
 
         # Be gentle with TMDB API
         time.sleep(0.25)
+
+    logger.info("Movie extraction completed!")
 
     return {
         "popular": popular,
@@ -95,7 +117,6 @@ def extract_all_categories(
         "details": details_list,
         "credits": credits_list,
     }
-
 
 
 
