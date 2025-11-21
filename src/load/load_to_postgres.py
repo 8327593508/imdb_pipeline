@@ -3,7 +3,7 @@ from src.utils.db_engine import get_engine
 def upsert_movies(movies):
     engine = get_engine()
     with engine.begin() as conn:
-        for movie in movies.iterrows():
+        for _, movie in movies.iterrows():
             conn.execute(
                 """
                 INSERT INTO movies (movie_id, title, popularity, vote_average)
