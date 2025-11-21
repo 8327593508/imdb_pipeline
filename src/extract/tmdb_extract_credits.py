@@ -1,7 +1,7 @@
 import requests
 from src.utils.logger import get_logger
 from config.config import TMDB_API_KEY
-from src.utils.session_retry import requests_retry_session
+from src.utils.session_retry import create_retry_session
 
 logger = get_logger("tmdb_extract_credits")
 
@@ -13,7 +13,7 @@ def extract_movie_credits(movie_id: int):
     url = BASE_URL.format(movie_id=movie_id)
     params = {"api_key": TMDB_API_KEY}
 
-    session = requests_retry_session()
+      session = create_retry_session()
 
     logger.info(f"Fetching credits for movie_id={movie_id}")
     response = session.get(url, params=params)
