@@ -1,34 +1,27 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB}
+
   app:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    environment:
-      TMDB_API_KEY: ${TMDB_API_KEY}
-      PG_USER: postgres
-      PG_PASSWORD: postgres
-      PG_HOST: postgres
-      PG_PORT: 5432
-      PG_DB: tmdb
+    container_name: imdb_pipeline_app
+    env_file:
+      - .env
     depends_on:
       - postgres
-
-  postgres:
-    image: postgres:14
-    restart: always
+    command: ["python", "-u", "src/main.py"]
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: tmdb
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      PYTHONPATH: "/app"
 
-volumes:
-  postgres_data:
 
 
 
