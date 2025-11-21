@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS movie_details (
 
 CREATE TABLE IF NOT EXISTS movie_credits (
     movie_id BIGINT,
-    cast JSONB,
-    crew JSONB
+    movie_cast JSONB,
+    movie_crew JSONB
 );
+
