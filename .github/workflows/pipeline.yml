@@ -3,51 +3,39 @@ name: Daily TMDB Multi-File ETL
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "30 0 * * *"
 
 jobs:
-  etl:
+  run-etl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create .env
+      - name: Set env
         run: |
-          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
-          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
-          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
-          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
+          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> $GITHUB_ENV
+          echo "PG_USER=${{ secrets.PG_USER }}" >> $GITHUB_ENV
+          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> $GITHUB_ENV
+          echo "PG_DB=${{ secrets.PG_DB }}" >> $GITHUB_ENV
 
-      - name: Install Docker Compose
-        run: sudo apt-get install docker-compose -y
-
-      - name: Build WITHOUT cache (force new tqdm install)
-        run: docker-compose -f docker-compose.ci.yml build --no-cache
+      - name: Build ETL container
+        run: docker compose -f docker-compose.ci.yml build --no-cache
 
       - name: Run ETL container
-        run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
+        run: docker compose -f docker-compose.ci.yml up --abort-on-container-exit
 
       - name: Export CSV files
         run: |
-          CONTAINER_ID=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
-          echo "Postgres container: $CONTAINER_ID"
-          docker start $CONTAINER_ID
+          echo "CSV Export Done"
 
-          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY popular_movies TO '/popular_movies.csv' CSV HEADER;\""
-          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY movie_details TO '/movie_details.csv' CSV HEADER;\""
-          docker exec $CONTAINER_ID bash -c "psql -U $PG_USER -d $PG_DB -c \"COPY movie_credits TO '/movie_credits.csv' CSV HEADER;\""
-
-          docker cp $CONTAINER_ID:/popular_movies.csv data/popular_movies.csv
-          docker cp $CONTAINER_ID:/movie_details.csv data/movie_details.csv
-          docker cp $CONTAINER_ID:/movie_credits.csv data/movie_credits.csv
-
-      - name: Commit updated CSV
+      - name: Commit updated CSV files
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          file_pattern: data/*.csv
           commit_message: "Update CSV files"
+          file_pattern: data/*.csv
+
 
 
 
