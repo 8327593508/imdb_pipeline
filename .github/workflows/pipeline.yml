@@ -10,38 +10,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up env file
+      - name: Create .env
         run: |
           echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+          echo "PG_USER=${{ secrets.PG_USER }}" >> .env
+          echo "PG_PASSWORD=${{ secrets.PG_PASSWORD }}" >> .env
+          echo "PG_DB=${{ secrets.PG_DB }}" >> .env
 
-      - name: Install Docker Compose
-        run: sudo apt-get install docker-compose -y
-
-      - name: Build container (no cache)
+      - name: Build Docker images
         run: docker-compose -f docker-compose.ci.yml build --no-cache
 
-      - name: Run ETL container
+      - name: Run ETL
         run: docker-compose -f docker-compose.ci.yml up --abort-on-container-exit
-
-      - name: Export CSV
-        run: |
-          CONTAINER=$(docker ps -a --filter "name=postgres" --format "{{.ID}}")
-          docker start $CONTAINER
-          docker exec $CONTAINER psql -U postgres -d tmdb -c "COPY popular_movies TO '/popular_movies.csv' CSV HEADER;"
-          docker exec $CONTAINER psql -U postgres -d tmdb -c "COPY movie_details TO '/movie_details.csv' CSV HEADER;"
-          docker exec $CONTAINER psql -U postgres -d tmdb -c "COPY movie_credits TO '/movie_credits.csv' CSV HEADER;"
-          docker cp $CONTAINER:/popular_movies.csv data/popular_movies.csv
-          docker cp $CONTAINER:/movie_details.csv data/movie_details.csv
-          docker cp $CONTAINER:/movie_credits.csv data/movie_credits.csv
-
-      - name: Commit CSV updates
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          file_pattern: data/*.csv
-          commit_message: "Update CSV files"
 
 
 
