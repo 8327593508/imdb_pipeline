@@ -1,27 +1,44 @@
-# src/extract/tmdb_extract_credits.py
 import requests
 from src.utils.logger import get_logger
 from config.config import TMDB_API_KEY
+from src.utils.session_retry import requests_retry_session
 
 logger = get_logger("tmdb_extract_credits")
 
-BASE_URL = "https://api.themoviedb.org/3/movie"
+BASE_URL = "https://api.themoviedb.org/3/movie/{movie_id}/credits"
 
-def fetch_movie_credits(movie_id):
-    """
-    Fetch cast and crew details for a movie.
-    """
-    url = f"{BASE_URL}/{movie_id}/credits?api_key={TMDB_API_KEY}"
 
-    logger.info(f"Fetching credits for movie ID {movie_id}...")
+def extract_movie_credits(movie_id: int):
+    """Fetch cast and crew for a movie."""
+    url = BASE_URL.format(movie_id=movie_id)
+    params = {"api_key": TMDB_API_KEY}
 
-    response = requests.get(url)
+    session = requests_retry_session()
 
-    if response.status_code == 200:
-        return response.json()
+    logger.info(f"Fetching credits for movie_id={movie_id}")
+    response = session.get(url, params=params)
 
-    else:
-        logger.error(
-            f"Failed to fetch credits for ID {movie_id} (Status {response.status_code})"
-        )
+    if response.status_code != 200:
+        logger.error(f"Failed to fetch credits for movie {movie_id}")
         return None
+
+    data = response.json()
+
+    return {
+        "movie_id": movie_id,
+        "movie_cast": data.get("cast", []),   # UPDATED
+        "movie_crew": data.get("crew", [])    # UPDATED
+    }
+
+
+def extract_all_movie_credits(movie_ids: list[int]):
+    """Extract credits for all movie IDs."""
+    all_rows = []
+
+    for movie_id in movie_ids:
+        result = extract_movie_credits(movie_id)
+        if result:
+            all_rows.append(result)
+
+    return all_rows
+
