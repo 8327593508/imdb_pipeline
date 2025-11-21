@@ -1,37 +1,31 @@
-import pandas as pd
-from sqlalchemy import text
 from src.utils.db_engine import get_engine
+from src.utils.logger import get_logger
 
-engine = get_engine()
+logger = get_logger("load_movie_credits")
 
 
-def upsert_movie_credits(credits_data: list[dict]):
-    """
-    Inserts or updates movie credits (cast + crew) into PostgreSQL.
-    """
-    if not credits_data:
-        print("No credits data to insert.")
-        return
+def upsert_movie_credits(df_credits):
+    engine = get_engine()
+    conn = engine.raw_connection()
+    cursor = conn.cursor()
 
-    df = pd.DataFrame(credits_data)
+    for _, row in df_credits.iterrows():   # FIXED
 
-    # Ensure JSON-friendly structures
-    df["movie_cast"] = df["movie_cast"].apply(lambda x: x if isinstance(x, list) else [])
-    df["movie_crew"] = df["movie_crew"].apply(lambda x: x if isinstance(x, list) else [])
-
-    upsert_query = """
-    INSERT INTO movie_credits (movie_id, movie_cast, movie_crew)
-    VALUES (:movie_id, :movie_cast, :movie_crew)
-    ON CONFLICT (movie_id)
-    DO UPDATE SET 
-        movie_cast = EXCLUDED.movie_cast,
-        movie_crew = EXCLUDED.movie_crew;
-    """
-
-    with engine.begin() as conn:
-        conn.execute(
-            text(upsert_query),
-            df.to_dict(orient="records")
+        values = (
+            int(row["movie_id"]),
+            row["movie_cast"],
+            row["movie_crew"]
         )
 
-    print(f"Inserted/updated {len(df)} movie credits records.")
+        cursor.execute("""
+            INSERT INTO movie_credits (movie_id, movie_cast, movie_crew)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (movie_id)
+            DO UPDATE SET
+                movie_cast = EXCLUDED.movie_cast,
+                movie_crew = EXCLUDED.movie_crew;
+        """, values)
+
+    conn.commit()
+    cursor.close()
+    conn.close()
