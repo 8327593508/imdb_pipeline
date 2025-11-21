@@ -2,14 +2,23 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-def create_session(total_retries: int = 5, backoff: float = 0.5) -> requests.Session:
-    s = requests.Session()
-    retries = Retry(
-        total=total_retries,
-        backoff_factor=backoff,
-        status_forcelist=[429, 500, 502, 503, 504]
+
+def create_retry_session():
+    """
+    Creates a session with retry logic for HTTP requests.
+    """
+    session = requests.Session()
+
+    retry_strategy = Retry(
+        total=5,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
     )
-    adapter = HTTPAdapter(max_retries=retries)
-    s.mount('https://', adapter)
-    s.mount('http://', adapter)
-    return s
+
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    return session
+
