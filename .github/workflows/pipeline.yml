@@ -1,9 +1,10 @@
-name: Daily TMDB ETL
+
+name: Daily TMDB ETL - commit CSV
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *"   # Run every day 4 AM UTC
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 jobs:
   run-etl:
@@ -21,69 +22,52 @@ jobs:
           PG_USER=${{ secrets.PG_USER }}
           PG_PASSWORD=${{ secrets.PG_PASSWORD }}
           PG_DB=${{ secrets.PG_DB }}
-          PG_HOST=postgres
-          PG_PORT=5432
+          PG_PORT=${{ secrets.PG_PORT }}
           MAX_PAGES=${{ secrets.MAX_PAGES }}
           SCHEDULE=0
           EOF
-
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
-
-      # -------------------------------
-      # 1️⃣ Start only Postgres
-      # -------------------------------
+      # ---------------------------------------------
+      # 1️⃣ Start Postgres only (keep running)
+      # ---------------------------------------------
       - name: Start Postgres only
         run: docker-compose -f docker-compose.ci.yml up -d postgres
 
-      # -------------------------------
-      # 2️⃣ Run ETL exactly once
-      # -------------------------------
-      - name: Run ETL
+      # ---------------------------------------------
+      # 2️⃣ Run app one-time (ETL)
+      # ---------------------------------------------
+      - name: Run ETL once
         run: docker-compose -f docker-compose.ci.yml run --rm app
 
-      # -------------------------------
-      # 3️⃣ Export CSVs from Postgres
-      # -------------------------------
-      - name: Export CSV files
+      # ---------------------------------------------
+      # 3️⃣ Export CSV
+      # ---------------------------------------------
+      - name: Export CSV from Postgres
         run: |
-          mkdir -p data
-
-          PG_CONTAINER=$(docker ps --filter "name=tmdb_pipeline_postgres" --format "{{.ID}}")
-
-          echo "Using container: $PG_CONTAINER"
-
-          docker exec "$PG_CONTAINER" psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c "\COPY popular_movies TO '/tmp/popular_movies.csv' CSV HEADER"
-
-          docker exec "$PG_CONTAINER" psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c "\COPY movie_details TO '/tmp/movie_details.csv' CSV HEADER"
-
-          docker exec "$PG_CONTAINER" psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
-            -c "\COPY movie_credits TO '/tmp/movie_credits.csv' CSV HEADER"
-
-          docker cp "$PG_CONTAINER":/tmp/popular_movies.csv data/popular_movies.csv
-          docker cp "$PG_CONTAINER":/tmp/movie_details.csv data/movie_details.csv
-          docker cp "$PG_CONTAINER":/tmp/movie_credits.csv data/movie_credits.csv
-
-          echo "Files in data/:"
-          ls -lh data/
-
-      # -------------------------------
-      # 4️⃣ Auto commit CSV files
-      # -------------------------------
-      - name: Commit updated CSVs
+          echo "Searching for Postgres container..."
+          CONTAINER=$(docker ps --filter "name=postgres" --format "{{.ID}}")
+          echo "Postgres container = $CONTAINER"
+          echo "Running COPY command..."
+          docker exec $CONTAINER bash -c \
+            "psql -U ${{ secrets.PG_USER }} -d ${{ secrets.PG_DB }} \
+            -c \"\\COPY (SELECT * FROM popular_movies ORDER BY last_updated DESC) \
+            TO '/tmp/popular_movies.csv' CSV HEADER;\""
+          docker cp $CONTAINER:/tmp/popular_movies.csv ./data/popular_movies.csv
+      # ---------------------------------------------
+      # 4️⃣ Commit CSV to repo
+      # ---------------------------------------------
+      - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          file_pattern: data/*.csv
-          commit_message: "Update TMDB CSV files"
+          commit_message: "Update popular_movies.csv"
+          file_pattern: "data/popular_movies.csv"
           branch: main
 
-      # -------------------------------
-      # 5️⃣ Cleanup
-      # -------------------------------
+      # ---------------------------------------------
+      # 5️⃣ Cleanup everything
+      # ---------------------------------------------
       - name: Cleanup containers
-        if: always()
         run: docker-compose -f docker-compose.ci.yml down --volumes
