@@ -9,7 +9,6 @@ from src.transform.transform_movie_details import transform_movie_details
 from src.transform.transform_movie_credits import transform_movie_credits
 from src.load.load_to_postgres import upsert_movies
 from src.load.load_movie_details import upsert_movie_details
-from src.load.load_movie_credits import upsert_movie_credits
 from src.utils.logger import get_logger
 import time
 
